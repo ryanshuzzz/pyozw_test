@@ -1,155 +1,182 @@
-'''
-Manages the functions of the z-wave card
-'''
-import sys
-import time
-from pprint import pprint
 from openzwave.controller import ZWaveController
 from openzwave.network import ZWaveNetwork
 from openzwave.option import ZWaveOption
 from openzwave.node import ZWaveNode
 from pydispatch import dispatcher
-from config import constants
-from helpers.helper_functions import wait, singleton
-from . import signal_handlers
+import sys
+import time
 
+YALE_COMMANDS= ["Association Group Info",
+        "Association V2",
+        "Battery",
+        "Configuration",
+        "Device Reset Locally",
+        "Door Lock Logging",
+        "Door Lock V2",
+        "Firmware Update Meta-Data V3",
+        "Manufacturer Specific V2",
+        "Notification V4",
+        "Powerlevel",
+        "Schedule Entry Lock V3",
+        "Security S0",
+        "Time Parameters",
+        "Time V2",
+        "User Code",
+        "Version V2",
+        "Z-Wave Plus Info V2",
+ ]
 
-@singleton
-class Zwave:
-    '''
-    Functions to start, stop and retrieve devices from 
-    the network.
-    '''
-    device = constants.ZWAVE_DEV
-    _option = ZWaveOption(device=device)
-    _option.set_log_file(constants.ZWAVE_LOG)
+def louie_network_started(network):
+    print("Network homeid {:08x} - {} nodes were found.".format(network.home_id, network.nodes_count))
+
+def louie_network_failed(network):
+    print("Hello from network : can't load :(.")
+
+def louie_network_ready(network):
+    print("Hello from network : I'm ready : {} nodes were found.".format(network.nodes_count))
+    print("Hello from network : my controller is : {}".format(network.controller))
+    dispatcher.connect(louie_node_update, ZWaveNetwork.SIGNAL_NODE)
+    dispatcher.connect(louie_value_update, ZWaveNetwork.SIGNAL_VALUE)
+    dispatcher.connect(louie_node_added, ZWaveNetwork.SIGNAL_NODE_ADDED)
+
+def louie_node_update(network, node):
+    print("NODE : {}.".format(node))
+
+def louie_value_update(network, node, value):
+    print("     VALUE : {}.".format( value ))
+
+def louie_node_added(network, node, value):
+    print("Node added: {} {}.".format(node.manufacturer_name, value ))
+
+class Run:
+    dev = '/dev/ttyAMA0'
+    _option = ZWaveOption(device=dev)
+    _option.set_log_file("OZW_Log.log")
     _option.set_console_output(False)
     _option.lock()
     network = ZWaveNetwork(_option)
-
-    def __init__(self):
-        '''
-        Initialize the necessary functions to run the z-wave network
-        '''
-    @property
-    def nodes(self):
-        '''
-        Shows the nodes of the network. Generally the first node
-        is always the z-wave controller
-
-        :return: nodes
-        :rtype: dict
-        '''
-        return self.network.nodes
-
-    def set_node_value(self, node_id, value_id, data):
-        node = self.nodes.get(node_id)
-        if not node:
-            return False
-        value = node.get_values().get(value_id)
-        if value.type == "Bool":
-            if isinstance(data, bool):
-                value.data = data
-            else:
-                value.data = (data == "True")
-
-    def print_node_info(self, node_id):
-        '''
-        Print the node values in a easy to read
-        format.
-
-        :param node_id: id of the node for the values
-        :type node_id: int
-        '''
-        node = self.nodes.get(node_id)
-        if node:
-            values = node.get_values()
-            for k in values.values():
-                if k.data_items == "Unknown":
-                    continue
-                pprint(k.to_dict())
-
-        else:
-            print("No data for node_id: {}".format(node_id))
-
     def run(self):
-        '''
-        Initialize and run the network
-        '''
-        self.connect_signals()
-        self.init_network()
-
-    def connect_signals(self):
-        '''
-        Connects the Z-Wave network signals to the appropiate
-        signal handlers.
-        i.e. signal lock event for notification and database update
-        '''
-        dispatcher.connect(
-            signal_handlers.louie_network_started,
-            ZWaveNetwork.SIGNAL_NETWORK_STARTED
-        )
-        dispatcher.connect(
-            signal_handlers.louie_network_failed,
-            ZWaveNetwork.SIGNAL_NETWORK_FAILED
-        )
-        dispatcher.connect(
-            signal_handlers.louie_network_ready,
-            ZWaveNetwork.SIGNAL_NETWORK_READY
-        )
-
-    def init_network(self):
-        '''
-        Initialize the Z-Wave card and network until the network is ready.
-        '''
+        
+        dispatcher.connect(louie_network_started, ZWaveNetwork.SIGNAL_NETWORK_STARTED)
+        dispatcher.connect(louie_network_failed, ZWaveNetwork.SIGNAL_NETWORK_FAILED)
+        dispatcher.connect(louie_network_ready, ZWaveNetwork.SIGNAL_NETWORK_READY)
         self.network.start()
-        count = 0
-        while wait(1) and count < 300:
-            if self.network.state >= self.network.STATE_STARTED:
-                print("Z-Wave Network Started!")
+        for i in range(0,300):
+            if self.network.state>=self.network.STATE_STARTED:
+                print(" done")
                 break
-            count += 1
-        if self.network.state < self.network.STATE_STARTED:
+            else:
+                sys.stdout.write(".")
+                sys.stdout.flush()
+                time.sleep(1.0)
+        if self.network.state<self.network.STATE_STARTED:
             print(".")
             print("Can't initialise driver! Look at the logs in OZW_Log.log")
-            return
+            quit(1)
         print("***** Waiting for network to become ready : ")
-
-        count = 0
-        while wait(1) and count < 90:
-            if self.network.state >= self.network.STATE_READY:
+        for i in range(0,90):
+            if self.network.state>=self.network.STATE_READY:
                 print("***** Network is ready")
                 break
-            count += 1
-        if self.network.state < self.network.STATE_READY:
-            print("Unable to prepare network.")
+            else:
+                sys.stdout.write(".")
+                sys.stdout.flush()
+                time.sleep(1.0)
+        #time.sleep(5.0)
+        # print(self.network.controller.add_node(True))
+        # if self.network.controller.add_node(True):
+        #     time.sleep(10)
+        
+        while 1:
+            # print(self.network.nodes)
+            inp = input()
+            if inp == "c":
+                if self.network.controller.add_node(True):
+                    print("Add_node 10 sec")
+                    time.sleep(10)
+                else:
+                    print("Unable to go into inclusion")
+                    self.network.controller.cancel_command()
+            elif inp == "d":
+                if self.network.controller.remove_node():
+                    print("remove_node 10 sec")
+                    time.sleep(10)
+                else:
+                    print("Unable to go into exclusion mode")
+                    self.network.controller.cancel_command()
+            elif inp == "q":
+                break
+            elif inp == "add":
+                for node in self.network.nodes.values():
+                    if node.manufacturer_id == '0x0129':
+                        value = input("id:")
+                        command = input("command:")
+                        print(node.add_value(value_id=int(value), command_class=command))
+            print(self.network.state_str)
+            print(self.network.nodes)
+            if type(self.network.nodes) is dict:
+                try:
+                    for i, node in self.network.nodes.items():
+                        print(str(i) + ":")
+                        print('',node.manufacturer_name, node.manufacturer_id)
+                        print('',node.product_name, node.product_id)
+                        print('',node.device_type)
+                        values = node.get_values()
+                        
+                        for i,k in values.items():
+                            if k.data_items == "Unknown":
+                                continue
+                            print(str(i)+":")
+                            print("","Label:      ", k.label)
+                            print("","Data:       ", k.data)
+                            print("","Data_items: ", k.data_items)
+                            print("","is_polled:  ", k.is_polled)
+                        inp = input("Set Value[id]: ")
+                        if inp:
+                            if inp == 'q':
+                                break
+                            try:
+                                if values.get(int(inp)).type == "Bool":
+                                    values.get(int(inp)).data = input("value[T/F]: ") == "T"
+                                else:
+                                    values.get(int(inp)).data = input("value: ")
+                            except (TypeError, ValueError):
+                                continue
 
-    def inclusion(self, security=False):
-        '''
-        Put the z-wave card into inclusion mode. If security is selected, ensure that a 
-        network encryption key is initialzized in the libraries.
-        In env/libs/python/../python-openzwave/ozw_config/options.xml
-        If this isn't setup, secure inclusion mode WILL NOT WORK.
+                    # print(self.network.nodes[7].capabilities,"\n")
+                            '''print(node.get_command_class_genres())
+                            node.refresh_info()
+                            self.__print("is_sleeping", node.is_sleeping)
+                            self.__print("is_ready", node.is_ready)
+                            self.__print("is_locked", node.is_locked)
+                            print("USER:")
+                            for i in node.get_values().values():
+                                i.enable_poll()
+                                self.__print(i.label, i.data, ide=str(i.value_id))
+                                print("         type:        {}".format(i.type))
+                                print("         data_items:  {}".format(i.data_items))
+                                print("         is_polled:   {}".format(i.is_polled))
+                                print("         is_read_only:{}".format(i.is_read_only))'''
+                except (ValueError, KeyError):
+                    print("Unable to read data")
+                except KeyboardInterrupt:
+                    break
+            # break
+                # for _, val in values:
+                #     print(val.data_as_string())
+            time.sleep(1.0)
+        self.network.stop()
+    def __print(self, first, second, ide=""):
+        ide += ":" + first + ":"
+        first = ide
+        i = 30 - len(first)
+        for k in range(0,i):
+            first += " "
+        print("     {}{}".format(first, second))
 
-        :param security: secure or insecure inclusion, defaults to False
-        :type security: bool, optional
-        :return: successfully set mode
-        :rtype: bool
-        '''
-        return self.network.controller.add_node(doSecurity=security)
-
-    def exclusion(self):
-        '''
-        Puts the device into exlusion mode
-        '''
-        return self.network.controller.remove_node()
-
-    def cancel(self):
-        '''
-        Cancels the current command.
-        eg. If you put exclusion mode, it will go back to normal
-
-        :return: If cancel succeeded
-        :rtype: bool
-        '''
-        return self.network.controller.cancel_command()
+if __name__ == "__main__":
+    run = Run()
+    try:
+        run.run()
+    except KeyboardInterrupt:
+        run.network.stop()
